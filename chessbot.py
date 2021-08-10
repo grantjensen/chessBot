@@ -1,9 +1,12 @@
 import chess
-import random
 import chess.syzygy
 import numpy as np
 import sys
-import dask
+from chess.polyglot import zobrist_hash as zhash
+import time
+
+TT=[None]*0xFFFF
+
 
 pawn=np.array([0,  0,  0,  0,  0,  0,  0,  0,
 50, 50, 50, 50, 50, 50, 50, 50,
@@ -42,7 +45,7 @@ rook=np.array([0,  0,  0,  0,  0,  0,  0,  0,
  -5,  0,  0,  0,  0,  0,  0, -5,
  -5,  0,  0,  0,  0,  0,  0, -5,
  -5,  0,  0,  0,  0,  0,  0, -5,
-  0,  0,  0,  5,  5,  0,  0,  0])
+  0,  -10,  0,  5,  5,  0,  -10,  0])
 rook+=563
 
 queen=np.array([-20,-10,-10, -5, -5,-10,-10,-20,
@@ -81,43 +84,49 @@ def evaluate_board(board):
     for char in state:
         i+=1
         if char == " ":
-            return val
+            if board.turn:
+                return val
+            else:
+                return -val
         elif char == '/':
             i-=1
         elif char.isnumeric():
             i+=int(char)-1
             continue
         elif char == 'p':
-            val-=pawn[i]
+            val-=pawn[63-i]
         elif char == 'P':
-            val+=pawn[63-i]
+            val+=pawn[i]
         elif char == 'n':
-            val-=knight[i]
+            val-=knight[63-i]
         elif char == 'N':
-            val+=knight[63-i]
+            val+=knight[i]
         elif char == 'b':
-            val-=bishop[i]
+            val-=bishop[63-i]
         elif char == 'B':
-            val+=bishop[63-i]
+            val+=bishop[i]
         elif char == 'r':
-            val-=rook[i]
+            val-=rook[63-i]
         elif char == 'R':
-            val+=rook[63-i]
+            val+=rook[i]
         elif char == 'q':
-            val-=queen[i]
+            val-=queen[63-i]
         elif char == 'Q':
-            val+=queen[63-i]
+            val+=queen[i]
         elif char == 'k':
-            val-=king[i]
+            val-=king[63-i]
         elif char == 'K':
-            val+=king[63-i]
+            val+=king[i]
 
 
 def num_pieces(board):
     s=board.fen().split()[0]
     return sum(c.isalpha() for c in s)
 
-def evaluate(prevdict, prevval, move):
+def evaluate(prevdict, prevval, move, who_to_move):
+    if who_to_move:
+        prevval=-prevval
+    
 #     if(num_pieces(board))<=6:
 #         wdl=tablebase.probe_wdl(board)
 #         turn=board.turn
@@ -130,34 +139,33 @@ def evaluate(prevdict, prevval, move):
 #         else:
 #             # Tablebase draw
 #             return 0
-    evalin=prevval
     attack_piece=prevdict[move.from_square].symbol()
     if move.to_square in prevdict.keys():
         captured_piece=prevdict[move.to_square].symbol()
         if captured_piece == 'p':
-            prevval+=pawn[63-move.to_square]
+            prevval+=pawn[move.to_square]
         elif captured_piece == 'P':
-            prevval-=pawn[move.to_square]
+            prevval-=pawn[63-move.to_square]
         elif captured_piece == 'n':
-            prevval+=knight[63-move.to_square]
+            prevval+=knight[move.to_square]
         elif captured_piece == 'N':
-            prevval-=knight[move.to_square]
+            prevval-=knight[63-move.to_square]
         elif captured_piece == 'b':
-            prevval+=bishop[63-move.to_square]
+            prevval+=bishop[move.to_square]
         elif captured_piece == 'B':
-            prevval-=bishop[move.to_square]
+            prevval-=bishop[63-move.to_square]
         elif captured_piece == 'r':
-            prevval+=rook[63-move.to_square]
+            prevval+=rook[move.to_square]
         elif captured_piece == 'R':
-            prevval-=rook[move.to_square]
+            prevval-=rook[63-move.to_square]
         elif captured_piece == 'q':
-            prevval+=queen[63-move.to_square]
+            prevval+=queen[move.to_square]
         elif captured_piece == 'Q':
-            prevval-=queen[move.to_square]
+            prevval-=queen[63-move.to_square]
         elif captured_piece == 'k':
-            prevval+=king[63-move.to_square]
+            prevval+=king[move.to_square]
         elif captured_piece == 'K':
-            prevval-=king[move.to_square]
+            prevval-=king[63-move.to_square]
     promote=move.promotion
     if promote is not None:
         if attack_piece == 'p':
@@ -221,84 +229,112 @@ def evaluate(prevdict, prevval, move):
     elif attack_piece == 'K':
         prevval-=king[63-move.from_square]
         prevval+=king[63-move.to_square]
-    return prevval
+    if who_to_move:#white
+        return prevval
+    else:
+        return -prevval
 
 
-def minimax(currdepth, maxdepth, board, alpha, beta, prevval, move):
-    #global mtime    
+def minimax(depth, board, alpha, beta, prevval, move, piece_map, start_time, time_to_run):
     if board.outcome() is not None:
         winner=board.outcome().winner
         if winner is None:
-            return 0
+            return [0, None, False]
         elif(winner==True):
-            return 20000
+            if board.turn:
+                return [20000, None, False]
+            else:
+                return [-20000, None, False]
         else:
-            return -20000
-    if currdepth==maxdepth:
-        return prevval
-    
-    prevdict=board.piece_map()
-    moves=np.array(list(board.legal_moves))
-    vals=np.zeros(len(moves), dtype='int')
-    for i in range(len(moves)):
-        vals[i]=evaluate(prevdict, prevval, moves[i])
-    #ms=time.time()
-    ordering=np.argsort(vals)
-    #mtime+=time.time()-ms
-    vals=np.take(vals,ordering)
-    moves=np.take(moves,ordering)
-    
-    
-    
+            if board.turn:          
+                return [-20000, None, False]
+            else:
+                return [20000, None, False]
+    if depth==0:
+        return [prevval, None, False]
+    origalpha=alpha
+    currzorbrist=zhash(board)
+    hashval=currzorbrist%0xFFFF
+    if TT[hashval] is not None:
+        if TT[hashval].zorbrist==currzorbrist and TT[hashval].depth>=depth:
+            if TT[hashval].exact:
+                return [TT[hashval].val, chess.Move.from_uci(TT[hashval].best_move), 1]
+            if TT[hashval].alphaflag and alpha<TT[hashval].val:
+                alpha=TT[hashval].val
+            if TT[hashval].betaflag and beta>TT[hashval].val:
+                beta=TT[hashval].val
+            if(alpha>=beta):
+                return [TT[hashval].val, chess.Move.from_uci(TT[hashval].best_move), 1]
+    bestval=-20000
+    completed=True
+    piece_map=board.piece_map()
+    best_move=None
+    for i, move in enumerate(board.legal_moves):
+        tmpval=evaluate(piece_map,prevval,move, not board.turn)
+        board.push(move)
+        if i>0:
+            currval=-minimax(depth-1, board, -alpha-1, -alpha, tmpval,move, piece_map, start_time, time_to_run)[0]
+            if alpha<currval and currval < beta:
+                currval=-minimax(depth-1,board, -beta,-currval,tmpval,move,piece_map, start_time, time_to_run)[0]
+        else:
+            currval=-minimax(depth-1,board,-beta,-alpha,tmpval,move,piece_map, start_time, time_to_run)[0]
+        board.pop()
+        if(time.time()-start_time>=time_to_run): 
+            completed=False
+            break
+        if(bestval<currval):
+            bestval=currval
+            best_move=move
+            if bestval>=beta:
+                break
+        if alpha<bestval:
+            alpha=bestval
+    if(completed):
+        enterTT(board, origalpha, beta, -bestval, best_move.uci(), depth)
+    return [bestval, best_move, completed]
+
+
+def choose_move(board, time_to_run):
+    start_time=time.time()
+    val=evaluate_board(board)
+    TT=[None]*0xFFFF
+    for depth in range(1,10):
+        out=minimax(depth, board, -40000, 40000, val, None, None, start_time, time_to_run)
+        if out[2]:
+            best_move=out[1]
+        if(time.time()-start_time>=time_to_run):
+            break
+    return best_move
+
+
+
+def enterTT(board, alpha, beta, val, best_move, depth):
+    zorbrist=zhash(board)
+    hashval=zorbrist%0xFFFF
+    if(val<=alpha):
+        betaflag=True
+        alphaflag=False
+        exact=False
+    elif(val>=beta):
+        alphaflag=True
+        betaflag=False
+        exact=False
+    else:
+        alphaflag=False
+        betaflag=False
+        exact=True
+    entry=TTEntry(zorbrist, depth, -val, alphaflag, betaflag, exact, best_move)
+    TT[hashval]=entry
     
     
 
-    if board.turn:  # white player
-        moves=np.flip(moves)
-        vals=np.flip(vals)
-        best = -20000
-        index_max=-1
-        for i in range(len(moves)):
-            board.push(moves[i])
-            val = minimax(currdepth+1, maxdepth, board, alpha, beta, vals[i], moves[i])
-            board.pop()
-            if best<val:
-                best=val
-                index_max=i
-                alpha=max(alpha,best)
-                if beta<=alpha:
-                    break
-            
-        if currdepth==0:
-            return [best, moves[index_max]]
-        else:
-            return best
-    else:  # Black player
-        best=20000
-        index_min=-1
-        for i in range(len(moves)):
-            board.push(moves[i])
-            val = minimax(currdepth+1, maxdepth, board, alpha, beta, vals[i], moves[i])
-            board.pop()
-            if val<best:
-                index_min=i
-                best=val
-                beta=min(beta,best)
-                if beta<=alpha:
-                    break
-        if currdepth==0:
-            return [best, moves[index_min]]
-        else:
-            return best
-        
-        
 def flip(boardstr):
     l = boardstr.split("\n")
     reverse = "\n".join(l[::-1])
     return reverse
 
         
-def play(depth):
+def play(time_to_run):
     color=None
     while color!='w' and color!='b':
         color=input("Welcome to Grant's chess program!\nChoose a color.\nEnter w or b: ")
@@ -306,7 +342,7 @@ def play(depth):
     move_counter=1
     if color == 'b':
         while board.outcome() is None:
-            comp_move=minimax(0,depth,board,-40000,40000, evaluate_board(board), None)[1]
+            comp_move=choose_move(board, time_to_run)
             print(str(move_counter)+". "+board.san(comp_move)+"\n")
             board.push(comp_move)
             print(flip(chess.BaseBoard(board.board_fen()).unicode(invert_color=True)))
@@ -338,7 +374,7 @@ def play(depth):
             print("")
             if(board.outcome() is not None):
                 break
-            comp_move=minimax(0,depth,board,-40000,40000, evaluate_board(board), None)[1]
+            comp_move=choose_move(board, time_to_run)
             print(str(move_counter)+"... "+board.san(comp_move)+"\n")
             board.push(comp_move)
             print(chess.BaseBoard(board.board_fen()).unicode(invert_color=True))
@@ -346,3 +382,19 @@ def play(depth):
             move_counter+=1
     print(board.outcome())
             
+        
+class TTEntry:
+    def __init__(self, zorbrist, depth, val, alphaflag, betaflag, exact, best_move):
+        self.zorbrist = zorbrist #Full hash
+        self.depth = depth
+        self.val = val
+        self.alphaflag = alphaflag
+        self.betaflag = betaflag
+        self.exact = exact
+        self.best_move = best_move  # uci format
+        
+if __name__ == "__main__":
+    if len(sys.argv)!=2:
+        print("Incorrect number of args")
+    else:
+        play(int(sys.argv[1]))
