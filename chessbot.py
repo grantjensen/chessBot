@@ -7,6 +7,14 @@ import time
 
 TT=[None]*0xFFFF
 
+import chess
+import chess.syzygy
+import numpy as np
+import sys
+from chess.polyglot import zobrist_hash as zhash
+import time
+
+
 
 pawn=np.array([0,  0,  0,  0,  0,  0,  0,  0,
 50, 50, 50, 50, 50, 50, 50, 50,
@@ -119,26 +127,23 @@ def evaluate_board(board):
             val+=king[i]
 
 
-def num_pieces(board):
-    s=board.fen().split()[0]
-    return sum(c.isalpha() for c in s)
-
-def evaluate(prevdict, prevval, move, who_to_move):
+def evaluate(prevdict, prevval, move, board):
+    who_to_move = not board.turn
     if who_to_move:
         prevval=-prevval
-    
-#     if(num_pieces(board))<=6:
-#         wdl=tablebase.probe_wdl(board)
-#         turn=board.turn
-#         if((turn==True and wdl==2) or (turn==False and wdl==-2)):
-#             # Tablebase win
-#             return 20000
-#         elif(wdl==2 or wdl==-2):
-#             # Tablebase loss
-#             return -20000
-#         else:
-#             # Tablebase draw
-#             return 0
+    if board.is_en_passant(move):
+        if prevdict[move.from_square].symbol()=='p':  #black capture
+            prevval-=pawn[move.to_square]
+            prevval+=pawn[move.from_square]
+            prevval-=pawn[63-(move.to_square+8)]
+        else:
+            prevval-=pawn[63-move.from_square]
+            prevval+=pawn[63-move.to_square]
+            prevval+=pawn[move.to_square-8]
+        if who_to_move:#white
+            return prevval
+        else:
+            return -prevval
     attack_piece=prevdict[move.from_square].symbol()
     if move.to_square in prevdict.keys():
         captured_piece=prevdict[move.to_square].symbol()
@@ -234,6 +239,51 @@ def evaluate(prevdict, prevval, move, who_to_move):
     else:
         return -prevval
 
+def updatePieceMap(piece_map, move, board):
+    if move==None:
+        return piece_map
+    board.pop()
+    promote=move.promotion
+    if board.is_en_passant(move):
+        piece_map[move.to_square]=piece_map[move.from_square]
+        piece_map.pop(move.from_square)
+        if piece_map[move.to_square].symbol()=='p':
+            piece_map.pop(move.to_square+8)
+        else:
+            piece_map.pop(move.to_square-8)
+        board.push(move)
+        return piece_map
+    if board.is_castling(move):
+        if move.to_square==6:#white kingside castle
+            piece_map[5]=piece_map[7]
+            piece_map.pop(7)
+        elif move.to_square==2:# white queenside
+            piece_map[3]=piece_map[0]
+            piece_map.pop(0)
+        elif move.to_square==62:# black kingside
+            piece_map[61]=piece_map[63]
+            piece_map.pop(63)
+        else:#black queenside
+            piece_map[59]=piece_map[56]
+            piece_map.pop(56)
+            
+    if promote is None:
+        piece_map[move.to_square]=piece_map[move.from_square]
+        piece_map.pop(move.from_square)
+        board.push(move)
+        return piece_map
+    else:
+        piece_map.pop(move.from_square)
+        if promote==5:
+            piece_map[move.to_square]=chess.Piece.from_symbol('Q')
+        if promote==4:
+            piece_map[move.to_square]=chess.Piece.from_symbol('R')
+        if promote==3:
+            piece_map[move.to_square]=chess.Piece.from_symbol('B')
+        if promote==2:
+            piece_map[move.to_square]=chess.Piece.from_symbol('N')
+        board.push(move)
+        return piece_map
 
 def minimax(depth, board, alpha, beta, prevval, move, piece_map, start_time, time_to_run):
     if board.outcome() is not None:
@@ -267,14 +317,17 @@ def minimax(depth, board, alpha, beta, prevval, move, piece_map, start_time, tim
                 return [TT[hashval].val, chess.Move.from_uci(TT[hashval].best_move), 1]
     bestval=-20000
     completed=True
-    piece_map=board.piece_map()
+    piece_map=updatePieceMap(piece_map, move, board)
+    pmc=piece_map.copy()
     best_move=None
     for i, move in enumerate(board.legal_moves):
-        tmpval=evaluate(piece_map,prevval,move, not board.turn)
+        piece_map=pmc.copy()
+        tmpval=evaluate(piece_map,prevval,move, board)
         board.push(move)
         if i>0:
             currval=-minimax(depth-1, board, -alpha-1, -alpha, tmpval,move, piece_map, start_time, time_to_run)[0]
             if alpha<currval and currval < beta:
+                piece_map=pmc.copy()
                 currval=-minimax(depth-1,board, -beta,-currval,tmpval,move,piece_map, start_time, time_to_run)[0]
         else:
             currval=-minimax(depth-1,board,-beta,-alpha,tmpval,move,piece_map, start_time, time_to_run)[0]
@@ -299,7 +352,7 @@ def choose_move(board, time_to_run):
     val=evaluate_board(board)
     TT=[None]*0xFFFF
     for depth in range(1,10):
-        out=minimax(depth, board, -40000, 40000, val, None, None, start_time, time_to_run)
+        out=minimax(depth, board, -40000, 40000, val, None, board.piece_map(), start_time, time_to_run)
         if out[2]:
             best_move=out[1]
         if(time.time()-start_time>=time_to_run):
@@ -332,6 +385,8 @@ def flip(boardstr):
     l = boardstr.split("\n")
     reverse = "\n".join(l[::-1])
     return reverse
+
+
 
         
 def play(time_to_run):
