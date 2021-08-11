@@ -7,14 +7,6 @@ import time
 
 TT=[None]*0xFFFF
 
-import chess
-import chess.syzygy
-import numpy as np
-import sys
-from chess.polyglot import zobrist_hash as zhash
-import time
-
-
 
 pawn=np.array([0,  0,  0,  0,  0,  0,  0,  0,
 50, 50, 50, 50, 50, 50, 50, 50,
@@ -242,7 +234,6 @@ def evaluate(prevdict, prevval, move, board):
 def updatePieceMap(piece_map, move, board):
     if move==None:
         return piece_map
-    board.pop()
     promote=move.promotion
     if board.is_en_passant(move):
         piece_map[move.to_square]=piece_map[move.from_square]
@@ -251,7 +242,6 @@ def updatePieceMap(piece_map, move, board):
             piece_map.pop(move.to_square+8)
         else:
             piece_map.pop(move.to_square-8)
-        board.push(move)
         return piece_map
     if board.is_castling(move):
         if move.to_square==6:#white kingside castle
@@ -270,7 +260,6 @@ def updatePieceMap(piece_map, move, board):
     if promote is None:
         piece_map[move.to_square]=piece_map[move.from_square]
         piece_map.pop(move.from_square)
-        board.push(move)
         return piece_map
     else:
         piece_map.pop(move.from_square)
@@ -282,7 +271,6 @@ def updatePieceMap(piece_map, move, board):
             piece_map[move.to_square]=chess.Piece.from_symbol('B')
         if promote==2:
             piece_map[move.to_square]=chess.Piece.from_symbol('N')
-        board.push(move)
         return piece_map
 
 def minimax(depth, board, alpha, beta, prevval, move, piece_map, start_time, time_to_run):
@@ -317,17 +305,16 @@ def minimax(depth, board, alpha, beta, prevval, move, piece_map, start_time, tim
                 return [TT[hashval].val, chess.Move.from_uci(TT[hashval].best_move), 1]
     bestval=-20000
     completed=True
-    piece_map=updatePieceMap(piece_map, move, board)
-    pmc=piece_map.copy()
     best_move=None
+    pmc=piece_map.copy()
     for i, move in enumerate(board.legal_moves):
-        piece_map=pmc.copy()
-        tmpval=evaluate(piece_map,prevval,move, board)
+        tmpval=evaluate(pmc,prevval,move, board)
+        piece_map=updatePieceMap(pmc.copy(), move, board)
+        
         board.push(move)
         if i>0:
             currval=-minimax(depth-1, board, -alpha-1, -alpha, tmpval,move, piece_map, start_time, time_to_run)[0]
             if alpha<currval and currval < beta:
-                piece_map=pmc.copy()
                 currval=-minimax(depth-1,board, -beta,-currval,tmpval,move,piece_map, start_time, time_to_run)[0]
         else:
             currval=-minimax(depth-1,board,-beta,-alpha,tmpval,move,piece_map, start_time, time_to_run)[0]
