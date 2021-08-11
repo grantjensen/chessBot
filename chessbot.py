@@ -309,7 +309,8 @@ def minimax(depth, board, alpha, beta, prevval, move, piece_map, start_time, tim
     pmc=piece_map.copy()
     for i, move in enumerate(board.legal_moves):
         tmpval=evaluate(pmc,prevval,move, board)
-        piece_map=updatePieceMap(pmc.copy(), move, board)
+        if depth!=1:
+            piece_map=updatePieceMap(pmc.copy(), move, board)
         
         board.push(move)
         if i>0:
