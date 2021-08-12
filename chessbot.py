@@ -435,6 +435,7 @@ def enterTT(board, alpha, beta, val, best_move, depth, piece_map, prevhash):
 
 def flip(boardstr):
     l = boardstr.split("\n")
+    l = [ll[::-1] for ll in l]
     reverse = "\n".join(l[::-1])
     return reverse
 
