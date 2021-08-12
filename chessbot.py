@@ -5,8 +5,6 @@ import sys
 from chess.polyglot import zobrist_hash as zhash
 import time
 
-TT=[None]*0xFFFF
-
 
 pawn=np.array([0,  0,  0,  0,  0,  0,  0,  0,
 50, 50, 50, 50, 50, 50, 50, 50,
@@ -66,6 +64,7 @@ king=np.array([-30,-40,-40,-50,-50,-40,-40,-30,
 -10,-20,-20,-20,-20,-20,-20,-10,
  20, 20,  0,  0,  0,  0, 20, 20,
  20, 30, 10,  0,  0, 10, 30, 20])
+king+=20000
 
 kingend=np.array([[-50,-40,-30,-20,-20,-30,-40,-50],
 [-30,-20,-10,  0,  0,-10,-20,-30],
@@ -123,6 +122,27 @@ def evaluate(prevdict, prevval, move, board):
     who_to_move = not board.turn
     if who_to_move:
         prevval=-prevval
+    if board.is_castling(move):
+        if move.to_square==6:#white kingside castle
+            prevval-=king[4]
+            prevval+=king[6]
+            prevval-=rook[7]
+            prevval+=rook[5]
+        elif move.to_square==2:# white queenside
+            prevval-=king[4]
+            prevval+=king[2]
+            prevval-=rook[0]
+            prevval+=rook[3]
+        elif move.to_square==62:# black kingside
+            prevval+=king[60]
+            prevval-=king[62]
+            prevval+=rook[63]
+            prevval-=rook[61]
+        else:#black queenside
+            prevval+=king[60]
+            prevval-=king[58]
+            prevval+=rook[56]
+            prevval-=rook[59]
     if board.is_en_passant(move):
         if prevdict[move.from_square].symbol()=='p':  #black capture
             prevval-=pawn[move.to_square]
@@ -158,7 +178,7 @@ def evaluate(prevdict, prevval, move, board):
         elif captured_piece == 'q':
             prevval+=queen[move.to_square]
         elif captured_piece == 'Q':
-            prevval-=queen[63-move.to_square]
+            prevval-=queen[int((56-16*np.floor(move.to_square/8))+(move.to_square%8))]
         elif captured_piece == 'k':
             prevval+=king[move.to_square]
         elif captured_piece == 'K':
@@ -186,7 +206,7 @@ def evaluate(prevdict, prevval, move, board):
             elif promote==4:
                 prevval+=rook[63-move.to_square]
             elif promote==5:
-                prevval+=queen[63-move.to_square]
+                prevval+=queen[int((56-16*np.floor(move.to_square/8))+(move.to_square%8))]
             else:
                 print("Promotion error")
         
@@ -218,8 +238,8 @@ def evaluate(prevdict, prevval, move, board):
         prevval-=queen[move.to_square]
         prevval+=queen[move.from_square]
     elif attack_piece == 'Q':
-        prevval-=queen[63-move.from_square]
-        prevval+=queen[63-move.to_square]
+        prevval-=queen[int((56-16*np.floor(move.from_square/8))+(move.from_square%8))]
+        prevval+=queen[int((56-16*np.floor(move.to_square/8))+(move.to_square%8))]
     elif attack_piece == 'k':
         prevval-=king[move.to_square]
         prevval+=king[move.from_square]
@@ -272,8 +292,68 @@ def updatePieceMap(piece_map, move, board):
         if promote==2:
             piece_map[move.to_square]=chess.Piece.from_symbol('N')
         return piece_map
+    
+hasharray=chess.polyglot.POLYGLOT_RANDOM_ARRAY
+def updateHash(board, move, piece_map, prevhash):
+    if move is None:
+        return prevhash
+    prevhash^=hasharray[780]#adjust for move changing
+    if board.is_kingside_castling(move):
+        if board.turn: # white kingside castling
+            prevhash^=hasharray[768]^hasharray[708]^hasharray[710]^ hasharray[453]^hasharray[455]
+            return prevhash
+        else:#black kingsideabs
+            prevhash^=hasharray[770]^hasharray[700]^hasharray[702]^hasharray[445]^hasharray[447]
+            return prevhash
+    elif board.is_queenside_castling(move):
+        if board.turn: # white queen side castling
+            prevhash^=hasharray[769]^hasharray[708]^hasharray[706]^hasharray[451]^hasharray[448]
+            return prevhash
+        else: #black queenside
+            prevhash^=hasharray[771]^hasharray[700]^hasharray[698]^hasharray[443]^hasharray[440]
+            return prevhash
+    movingPiece=piece_map[move.from_square]
+    movingIndex=(movingPiece.piece_type-1)*2+int(movingPiece.color)
+    prevhash^=hasharray[64*movingIndex+move.from_square]
+    promote=move.promotion
+    if promote is not None:
+        promoteIndex=(promote-1)*2+int(movingPiece.color)
+        prevhash^=hasharray[64*promoteIndex+move.to_square]
+        return prevhash
+    
+    prevhash^=hasharray[64*movingIndex+move.to_square]
+    if move.to_square in piece_map.keys():  #If move is a capture
+        attackPiece=piece_map[move.to_square]
+        if attackPiece is not None:
+            attackIndex=(attackPiece.piece_type-1)*2+int(attackPiece.color)
+            prevhash^=hasharray[64*attackIndex+move.to_square]
+    if board.is_en_passant(move): #Note, didn't add in en passant rights to hashing.
+        if board.turn: #white captured en passant
+            prevhash^=hasharray[move.to_square-8]
+        else:
+            prevhash^=hasharray[64+move.to_square+8]
+    return prevhash
 
-def minimax(depth, board, alpha, beta, prevval, move, piece_map, start_time, time_to_run):
+
+def minimax(depth, board, alpha, beta, prevval, move, piece_map, start_time, time_to_run, prevhash):
+    currzobrist=updateHash(board, move, piece_map, prevhash)
+    if depth!=0:
+        piece_map=updatePieceMap(piece_map.copy(), move, board)
+    if move is not None:
+        board.push(move)
+    if depth==0:
+        return [prevval, None, False]
+    hashval=currzobrist%0xFFFF
+    if TT[hashval] is not None:
+        if TT[hashval].zobrist==currzobrist and TT[hashval].depth>=depth:
+            if TT[hashval].exact:
+                return [TT[hashval].val, chess.Move.from_uci(TT[hashval].best_move), 1]
+            if TT[hashval].alphaflag and alpha<TT[hashval].val:
+                alpha=TT[hashval].val
+            if TT[hashval].betaflag and beta>TT[hashval].val:
+                beta=TT[hashval].val
+            if(alpha>=beta):
+                return [TT[hashval].val, chess.Move.from_uci(TT[hashval].best_move), 1]
     if board.outcome() is not None:
         winner=board.outcome().winner
         if winner is None:
@@ -288,37 +368,22 @@ def minimax(depth, board, alpha, beta, prevval, move, piece_map, start_time, tim
                 return [-20000, None, False]
             else:
                 return [20000, None, False]
-    if depth==0:
-        return [prevval, None, False]
     origalpha=alpha
-    currzorbrist=zhash(board)
-    hashval=currzorbrist%0xFFFF
-    if TT[hashval] is not None:
-        if TT[hashval].zorbrist==currzorbrist and TT[hashval].depth>=depth:
-            if TT[hashval].exact:
-                return [TT[hashval].val, chess.Move.from_uci(TT[hashval].best_move), 1]
-            if TT[hashval].alphaflag and alpha<TT[hashval].val:
-                alpha=TT[hashval].val
-            if TT[hashval].betaflag and beta>TT[hashval].val:
-                beta=TT[hashval].val
-            if(alpha>=beta):
-                return [TT[hashval].val, chess.Move.from_uci(TT[hashval].best_move), 1]
+    
+    
     bestval=-20000
     completed=True
     best_move=None
     pmc=piece_map.copy()
     for i, move in enumerate(board.legal_moves):
         tmpval=evaluate(pmc,prevval,move, board)
-        if depth!=1:
-            piece_map=updatePieceMap(pmc.copy(), move, board)
-        
-        board.push(move)
         if i>0:
-            currval=-minimax(depth-1, board, -alpha-1, -alpha, tmpval,move, piece_map, start_time, time_to_run)[0]
+            currval=-minimax(depth-1, board, -alpha-1, -alpha, tmpval,move, pmc, start_time, time_to_run, currzobrist)[0]
             if alpha<currval and currval < beta:
-                currval=-minimax(depth-1,board, -beta,-currval,tmpval,move,piece_map, start_time, time_to_run)[0]
+                board.pop()
+                currval=-minimax(depth-1,board, -beta,-currval,tmpval,move,pmc, start_time, time_to_run, currzobrist)[0]
         else:
-            currval=-minimax(depth-1,board,-beta,-alpha,tmpval,move,piece_map, start_time, time_to_run)[0]
+            currval=-minimax(depth-1,board,-beta,-alpha,tmpval,move,pmc, start_time, time_to_run, currzobrist)[0]
         board.pop()
         if(time.time()-start_time>=time_to_run): 
             completed=False
@@ -331,16 +396,15 @@ def minimax(depth, board, alpha, beta, prevval, move, piece_map, start_time, tim
         if alpha<bestval:
             alpha=bestval
     if(completed):
-        enterTT(board, origalpha, beta, -bestval, best_move.uci(), depth)
+        enterTT(board, origalpha, beta, -bestval, best_move, depth, piece_map, prevhash)
     return [bestval, best_move, completed]
 
 
 def choose_move(board, time_to_run):
     start_time=time.time()
     val=evaluate_board(board)
-    TT=[None]*0xFFFF
     for depth in range(1,10):
-        out=minimax(depth, board, -40000, 40000, val, None, board.piece_map(), start_time, time_to_run)
+        out=minimax(depth, board, -40000, 40000, val, None, board.piece_map(), start_time, time_to_run, zhash(board))
         if out[2]:
             best_move=out[1]
         if(time.time()-start_time>=time_to_run):
@@ -349,9 +413,9 @@ def choose_move(board, time_to_run):
 
 
 
-def enterTT(board, alpha, beta, val, best_move, depth):
-    zorbrist=zhash(board)
-    hashval=zorbrist%0xFFFF
+def enterTT(board, alpha, beta, val, best_move, depth, piece_map, prevhash):
+    zobrist=updateHash(board,best_move,piece_map, prevhash)
+    hashval=zobrist%0xFFFF
     if(val<=alpha):
         betaflag=True
         alphaflag=False
@@ -364,7 +428,7 @@ def enterTT(board, alpha, beta, val, best_move, depth):
         alphaflag=False
         betaflag=False
         exact=True
-    entry=TTEntry(zorbrist, depth, -val, alphaflag, betaflag, exact, best_move)
+    entry=TTEntry(zobrist, depth, -val, alphaflag, betaflag, exact, best_move.uci())
     TT[hashval]=entry
     
     
@@ -374,9 +438,7 @@ def flip(boardstr):
     reverse = "\n".join(l[::-1])
     return reverse
 
-
-
-        
+TT=[None]*0xFFFF
 def play(time_to_run):
     color=None
     while color!='w' and color!='b':
@@ -427,8 +489,8 @@ def play(time_to_run):
             
         
 class TTEntry:
-    def __init__(self, zorbrist, depth, val, alphaflag, betaflag, exact, best_move):
-        self.zorbrist = zorbrist #Full hash
+    def __init__(self, zobrist, depth, val, alphaflag, betaflag, exact, best_move):
+        self.zobrist = zobrist #Full hash
         self.depth = depth
         self.val = val
         self.alphaflag = alphaflag
