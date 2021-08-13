@@ -395,8 +395,8 @@ def minimax(depth, board, alpha, beta, prevval, move, piece_map, start_time, tim
                 break
         if alpha<bestval:
             alpha=bestval
-#     if(completed):
-#         enterTT(board, origalpha, beta, -bestval, best_move, depth, piece_map, prevhash)
+    if(completed and best_move is not None):
+        enterTT(board, origalpha, beta, -bestval, best_move, depth, piece_map, prevhash)
     return [bestval, best_move, completed]
 
 
