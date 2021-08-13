@@ -153,9 +153,9 @@ def evaluate(prevdict, prevval, move, board):
             prevval+=pawn[63-move.to_square]
             prevval+=pawn[move.to_square-8]
         if who_to_move:#white
-            return prevval
-        else:
             return -prevval
+        else:
+            return prevval
     attack_piece=prevdict[move.from_square].symbol()
     if move.to_square in prevdict.keys():
         captured_piece=prevdict[move.to_square].symbol()
@@ -178,7 +178,7 @@ def evaluate(prevdict, prevval, move, board):
         elif captured_piece == 'q':
             prevval+=queen[move.to_square]
         elif captured_piece == 'Q':
-            prevval-=queen[int((56-16*np.floor(move.to_square/8))+(move.to_square%8))]
+            prevval-=queen[63-move.to_square]
         elif captured_piece == 'k':
             prevval+=king[move.to_square]
         elif captured_piece == 'K':
@@ -206,7 +206,7 @@ def evaluate(prevdict, prevval, move, board):
             elif promote==4:
                 prevval+=rook[63-move.to_square]
             elif promote==5:
-                prevval+=queen[int((56-16*np.floor(move.to_square/8))+(move.to_square%8))]
+                prevval+=queen[63-move.to_square]
             else:
                 print("Promotion error")
         
@@ -238,8 +238,8 @@ def evaluate(prevdict, prevval, move, board):
         prevval-=queen[move.to_square]
         prevval+=queen[move.from_square]
     elif attack_piece == 'Q':
-        prevval-=queen[int((56-16*np.floor(move.from_square/8))+(move.from_square%8))]
-        prevval+=queen[int((56-16*np.floor(move.to_square/8))+(move.to_square%8))]
+        prevval-=queen[63-move.from_square]
+        prevval+=queen[63-move.to_square]
     elif attack_piece == 'k':
         prevval-=king[move.to_square]
         prevval+=king[move.from_square]
@@ -395,8 +395,8 @@ def minimax(depth, board, alpha, beta, prevval, move, piece_map, start_time, tim
                 break
         if alpha<bestval:
             alpha=bestval
-    if(completed):
-        enterTT(board, origalpha, beta, -bestval, best_move, depth, piece_map, prevhash)
+#     if(completed):
+#         enterTT(board, origalpha, beta, -bestval, best_move, depth, piece_map, prevhash)
     return [bestval, best_move, completed]
 
 
