@@ -412,31 +412,31 @@ def minimax(depth, board, alpha, beta, prevval, move, piece_map, start_time, tim
         piece_map=updatePieceMap(piece_map.copy(), move, board)
     if move is not None:
         board.push(move)
-    hashval=currzobrist%0xFFFF
-    if TT[hashval] is not None:
-        if TT[hashval].zobrist==currzobrist and TT[hashval].depth>=depth:
-            if TT[hashval].exact:
-                return [TT[hashval].val, chess.Move.from_uci(TT[hashval].best_move), 1]
-            if TT[hashval].alphaflag and alpha<TT[hashval].val:
-                alpha=TT[hashval].val
-            if TT[hashval].betaflag and beta>TT[hashval].val:
-                beta=TT[hashval].val
-            if(alpha>=beta):
-                return [TT[hashval].val, chess.Move.from_uci(TT[hashval].best_move), 1]
-    if board.outcome() is not None:
-        winner=board.outcome().winner
-        if winner is None:
-            return [0, None, False]
-        elif(winner==True):
-            if board.turn:
-                return [20000, None, False]
+        hashval=currzobrist%0xFFFF
+        if TT[hashval] is not None:
+            if TT[hashval].zobrist==currzobrist and TT[hashval].depth>=depth:
+                if TT[hashval].exact:
+                    return [TT[hashval].val, chess.Move.from_uci(TT[hashval].best_move), 1]
+                if TT[hashval].alphaflag and alpha<TT[hashval].val:
+                    alpha=TT[hashval].val
+                if TT[hashval].betaflag and beta>TT[hashval].val:
+                    beta=TT[hashval].val
+                if(alpha>=beta):
+                    return [TT[hashval].val, chess.Move.from_uci(TT[hashval].best_move), 1]
+        if board.outcome() is not None:
+            winner=board.outcome().winner
+            if winner is None:
+                return [0, None, False]
+            elif(winner==True):
+                if board.turn:
+                    return [20000, None, False]
+                else:
+                    return [-20000, None, False]
             else:
-                return [-20000, None, False]
-        else:
-            if board.turn:          
-                return [-20000, None, False]
-            else:
-                return [20000, None, False]
+                if board.turn:          
+                    return [-20000, None, False]
+                else:
+                    return [20000, None, False]
     origalpha=alpha
     
     
@@ -484,7 +484,6 @@ def choose_move(board, time_to_run):
         best_move: best_move in position inputed
     """
     start_time=time.time()
-    TT=[None]*0xFFFF
     val=evaluate_board(board)
     piece_map=board.piece_map()
     prevhash=zhash(board)
